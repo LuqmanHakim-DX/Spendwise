@@ -1,3 +1,3 @@
-# test_website_gemini
+# Spendwise
 
-A new Flutter project.
+A budget tracking Flutter app.

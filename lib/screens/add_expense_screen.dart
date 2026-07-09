@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/expense_provider.dart';
 import '../models/expense.dart';
-import 'dashboard_screen.dart';
+import 'home_screen.dart';
 import 'analytics_screen.dart';
 import 'budget_screen.dart';
+import 'calendar_screen.dart';
+import 'profile_screen.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/exit_confirmation_scope.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   const AddExpenseScreen({super.key});
@@ -19,14 +23,27 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final _amountController = TextEditingController();
   final _descriptionController = TextEditingController();
   String _selectedCategory = 'Food';
-  final DateTime _selectedDate = DateTime.now();
+  DateTime _selectedDate = DateTime.now();
 
   final List<String> _categories = ['Food', 'Transport', 'Bills', 'Entertainment', 'Other'];
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Add Expense')),
+    context.watch<ExpenseProvider>();
+    return ExitConfirmationScope(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Add Expense'),
+        ),
+        drawer: AppDrawer(
+        currentIndex: 1,
+        onDestinationSelected: (index) => _navigateToIndex(context, index),
+        onLogout: () async {
+          await context.read<AuthProvider>().signOut();
+          if (!context.mounted) return;
+          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        },
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -52,6 +69,24 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               controller: _descriptionController,
               decoration: const InputDecoration(labelText: 'Description'),
             ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Expense Date'),
+              subtitle: Text(_selectedDate.toLocal().toString().split(' ')[0]),
+              trailing: const Icon(Icons.calendar_today),
+              onTap: () async {
+                final pickedDate = await showDatePicker(
+                  context: context,
+                  initialDate: _selectedDate,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2100),
+                );
+                if (pickedDate != null) {
+                  setState(() => _selectedDate = pickedDate);
+                }
+              },
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _addExpense,
@@ -60,21 +95,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.blue.shade900,
-        selectedItemColor: Colors.white,
-        unselectedItemColor: Colors.white70,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Expense'),
-          BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Analytics'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Budget'),
-        ],
-        currentIndex: 1,
-        onTap: (index) => _navigateToIndex(context, index),
-      ),
-    );
+    ));
   }
 
   void _navigateToIndex(BuildContext context, int index) {
@@ -82,13 +103,19 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     Widget target;
     switch (index) {
       case 0:
-        target = const DashboardScreen();
+        target = const HomeScreen();
         break;
       case 2:
-        target = const AnalyticsScreen();
+        target = const CalendarScreen();
         break;
       case 3:
+        target = const AnalyticsScreen();
+        break;
+      case 4:
         target = const BudgetScreen();
+        break;
+      case 5:
+        target = const ProfileScreen();
         break;
       default:
         return;
@@ -115,7 +142,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       description: description,
     );
 
-    await Provider.of<ExpenseProvider>(context, listen: false).addExpense(expense);
-    Navigator.pop(context);
+    await context.read<ExpenseProvider>().addExpense(expense);
+    if (!context.mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
   }
 }

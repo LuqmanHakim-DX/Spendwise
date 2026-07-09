@@ -1,6 +1,6 @@
 {
-    "name": "test_website_gemini",
-    "short_name": "test_website_gemini",
+    "name": "Spendwise",
+    "short_name": "Spendwise",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

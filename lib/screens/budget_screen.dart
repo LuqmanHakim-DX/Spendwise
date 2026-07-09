@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/expense_provider.dart';
 import '../models/budget.dart';
-import 'dashboard_screen.dart';
+import 'home_screen.dart';
 import 'add_expense_screen.dart';
 import 'analytics_screen.dart';
+import 'calendar_screen.dart';
+import 'profile_screen.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/exit_confirmation_scope.dart';
 
 class BudgetScreen extends StatefulWidget {
   const BudgetScreen({super.key});
@@ -17,19 +21,51 @@ class BudgetScreen extends StatefulWidget {
 class _BudgetScreenState extends State<BudgetScreen> {
   final _amountController = TextEditingController();
 
+  void _syncBudgetAmount() {
+    final expenseProvider = context.read<ExpenseProvider>();
+    final budgetText = expenseProvider.budget?.amount.toString() ?? '';
+    if (_amountController.text != budgetText) {
+      _amountController.text = budgetText;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    final expenseProvider = Provider.of<ExpenseProvider>(context, listen: false);
-    _amountController.text = expenseProvider.budget?.amount.toString() ?? '';
+    _syncBudgetAmount();
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final expenseProvider = Provider.of<ExpenseProvider>(context);
+    final expenseProvider = context.watch<ExpenseProvider>();
+    final budgetText = expenseProvider.budget?.amount.toString() ?? '';
+    if (_amountController.text != budgetText) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncBudgetAmount();
+      });
+    }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Set Budget')),
+    return ExitConfirmationScope(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Set Budget'),
+        ),
+        drawer: AppDrawer(
+        currentIndex: 4,
+        onDestinationSelected: (index) => _navigateToIndex(context, index),
+        onLogout: () async {
+          await context.read<AuthProvider>().signOut();
+          if (!context.mounted) return;
+          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        },
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -51,21 +87,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.blue.shade900,
-        selectedItemColor: Colors.white,
-        unselectedItemColor: Colors.white70,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Expense'),
-          BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Analytics'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Budget'),
-        ],
-        currentIndex: 3,
-        onTap: (index) => _navigateToIndex(context, index),
-      ),
-    );
+    ));
   }
 
   void _navigateToIndex(BuildContext context, int index) {
@@ -73,13 +95,19 @@ class _BudgetScreenState extends State<BudgetScreen> {
     Widget target;
     switch (index) {
       case 0:
-        target = const DashboardScreen();
+        target = const HomeScreen();
         break;
       case 1:
         target = const AddExpenseScreen();
         break;
       case 2:
+        target = const CalendarScreen();
+        break;
+      case 3:
         target = const AnalyticsScreen();
+        break;
+      case 5:
+        target = const ProfileScreen();
         break;
       default:
         return;
@@ -101,7 +129,12 @@ class _BudgetScreenState extends State<BudgetScreen> {
       endDate: DateTime.now().add(const Duration(days: 30)),
     );
 
-    await Provider.of<ExpenseProvider>(context, listen: false).setBudget(budget);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Budget set successfully')));
+    await context.read<ExpenseProvider>().setBudget(budget);
+    if (!context.mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
   }
 }

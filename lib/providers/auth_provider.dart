@@ -1,52 +1,120 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthProvider with ChangeNotifier {
-  bool _isLoggedIn = false;
-  bool _isLoading = true;
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  late final StreamSubscription<User?> _authSubscription;
 
-  bool get isLoggedIn => _isLoggedIn;
+  bool _isLoading = true;
+  User? _user;
+
+  bool get isLoggedIn => _user != null;
   bool get isLoading => _isLoading;
+  User? get user => _user;
 
   AuthProvider() {
-    _loadLoginStatus();
+    _authSubscription = _firebaseAuth.authStateChanges().listen((user) {
+      _user = user;
+      _isLoading = false;
+      notifyListeners();
+    });
   }
 
-  Future<void> _loadLoginStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    _isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    _isLoading = false;
-    notifyListeners();
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   Future<void> signIn(String email, String password) async {
-    // Simple mock login - in real app, validate credentials
-    if (email.isNotEmpty && password.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isLoggedIn', true);
-      _isLoggedIn = true;
-      notifyListeners();
-    } else {
-      throw Exception('Invalid credentials');
+    if (email.trim().isEmpty || password.isEmpty) {
+      throw Exception('Email and password are required');
+    }
+
+    try {
+      await _firebaseAuth.signInWithEmailAndPassword(
+        email: email.trim(),
+        password: password,
+      );
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_mapFirebaseError(e));
     }
   }
 
   Future<void> signUp(String email, String password) async {
-    // Mock signup
-    if (email.isNotEmpty && password.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isLoggedIn', true);
-      _isLoggedIn = true;
-      notifyListeners();
-    } else {
-      throw Exception('Invalid credentials');
+    if (email.trim().isEmpty || password.isEmpty) {
+      throw Exception('Email and password are required');
+    }
+
+    try {
+      await _firebaseAuth.createUserWithEmailAndPassword(
+        email: email.trim(),
+        password: password,
+      );
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_mapFirebaseError(e));
+    }
+  }
+
+  Future<void> signInWithGoogle() async {
+    try {
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        throw Exception('Google sign-in was cancelled.');
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      await _firebaseAuth.signInWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_mapFirebaseError(e));
     }
   }
 
   Future<void> signOut() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isLoggedIn', false);
-    _isLoggedIn = false;
+    _user = null;
+    _isLoading = false;
     notifyListeners();
+
+    try {
+      await _firebaseAuth.signOut();
+    } catch (_) {
+      // ignore Firebase sign-out failures and still let the UI update
+    }
+
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {
+      // ignore Google sign-out failures
+    }
+  }
+
+  String _mapFirebaseError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'invalid-email':
+        return 'The email address is not valid.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'user-not-found':
+        return 'No account found with that email.';
+      case 'wrong-password':
+        return 'The password is incorrect.';
+      case 'email-already-in-use':
+        return 'An account already exists for that email.';
+      case 'weak-password':
+        return 'Choose a stronger password.';
+      case 'operation-not-allowed':
+        return 'Email/password sign-in is not enabled.';
+      default:
+        return e.message ?? 'Authentication failed.';
+    }
   }
 }

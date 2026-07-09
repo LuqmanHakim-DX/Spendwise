@@ -1,22 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../providers/expense_provider.dart';
 import '../models/expense.dart';
-import 'dashboard_screen.dart';
+import 'home_screen.dart';
 import 'add_expense_screen.dart';
 import 'budget_screen.dart';
+import 'calendar_screen.dart';
+import 'profile_screen.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/exit_confirmation_scope.dart';
 
 class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final expenseProvider = Provider.of<ExpenseProvider>(context);
+    final expenseProvider = context.watch<ExpenseProvider>();
     final categoryData = expenseProvider.getCategoryExpenses();
     final expenses = expenseProvider.expenses;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Spending Analytics')),
+    return ExitConfirmationScope(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Spending Analytics'),
+        ),
+        drawer: AppDrawer(
+        currentIndex: 3,
+        onDestinationSelected: (index) => _navigateToIndex(context, index),
+        onLogout: () async {
+          await context.read<AuthProvider>().signOut();
+          if (!context.mounted) return;
+          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        },
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -64,7 +81,17 @@ class AnalyticsScreen extends StatelessWidget {
                         return ListTile(
                           title: Text(expense.title),
                           subtitle: Text('${expense.category} • ${expense.date.toLocal().toString().split(' ')[0]}'),
-                          trailing: Text('\$${expense.amount.toStringAsFixed(2)}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('\$${expense.amount.toStringAsFixed(2)}'),
+                              IconButton(
+                                icon: const Icon(Icons.delete),
+                                onPressed: () => _confirmDelete(context, expense),
+                                tooltip: 'Delete',
+                              ),
+                            ],
+                          ),
                           onTap: () => _showExpenseDetails(context, expense),
                         );
                       },
@@ -73,21 +100,7 @@ class AnalyticsScreen extends StatelessWidget {
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.blue.shade900,
-        selectedItemColor: Colors.white,
-        unselectedItemColor: Colors.white70,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Expense'),
-          BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Analytics'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Budget'),
-        ],
-        currentIndex: 2,
-        onTap: (index) => _navigateToIndex(context, index),
-      ),
-    );
+    ));
   }
 
   void _navigateToIndex(BuildContext context, int index) {
@@ -95,13 +108,19 @@ class AnalyticsScreen extends StatelessWidget {
     Widget target;
     switch (index) {
       case 0:
-        target = const DashboardScreen();
+        target = const HomeScreen();
         break;
       case 1:
         target = const AddExpenseScreen();
         break;
       case 3:
+        target = const CalendarScreen();
+        break;
+      case 4:
         target = const BudgetScreen();
+        break;
+      case 5:
+        target = const ProfileScreen();
         break;
       default:
         return;
@@ -140,5 +159,31 @@ class AnalyticsScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, Expense expense) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete Expense'),
+          content: const Text('Are you sure you want to delete this expense? This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete == true) {
+      await context.read<ExpenseProvider>().deleteExpense(expense);
+    }
   }
 }

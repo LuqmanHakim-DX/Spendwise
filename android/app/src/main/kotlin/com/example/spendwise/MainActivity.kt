@@ -1,4 +1,4 @@
-package com.example.test_website_gemini
+package com.example.spendwise
 
 import io.flutter.embedding.android.FlutterActivity
 

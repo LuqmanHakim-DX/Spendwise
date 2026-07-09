@@ -1,12 +1,19 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import '../models/expense.dart';
 import '../models/budget.dart';
+import '../models/expense.dart';
 
 class ExpenseProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  StreamSubscription<User?>? _authSubscription;
+
   List<Expense> _expenses = [];
   Budget? _budget;
+  String? _userId;
 
   List<Expense> get expenses => _expenses;
   Budget? get budget => _budget;
@@ -15,38 +22,84 @@ class ExpenseProvider with ChangeNotifier {
   double get remainingBudget => (_budget?.amount ?? 0) - totalExpenses;
 
   ExpenseProvider() {
-    _loadData();
+    _authSubscription = _auth.authStateChanges().listen(_handleAuthChanged);
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _handleAuthChanged(User? user) async {
+    _userId = user?.uid;
+    if (_userId == null) {
+      _expenses = [];
+      _budget = null;
+      notifyListeners();
+      return;
+    }
+
+    await _loadData();
   }
 
   Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final expensesJson = prefs.getStringList('expenses') ?? [];
-    _expenses = expensesJson.map((e) => Expense.fromJson(jsonDecode(e))).toList();
-
-    final budgetJson = prefs.getString('budget');
-    if (budgetJson != null) {
-      _budget = Budget.fromJson(jsonDecode(budgetJson));
+    if (_userId == null) {
+      return;
     }
+
+    final snapshot = await _firestore.collection('users').doc(_userId).get();
+    final data = snapshot.data();
+
+    _expenses = [];
+    _budget = null;
+
+    if (data != null && data['expenses'] is List) {
+      final expensesData = data['expenses'] as List<dynamic>;
+      _expenses = expensesData
+          .map((item) => Expense.fromFirestore(Map<String, dynamic>.from(item as Map), null))
+          .toList();
+    }
+
+    if (data != null && data['budget'] is Map) {
+      _budget = Budget.fromFirestore(Map<String, dynamic>.from(data['budget'] as Map));
+    }
+
     notifyListeners();
   }
 
   Future<void> _saveExpenses() async {
-    final prefs = await SharedPreferences.getInstance();
-    final expensesJson = _expenses.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList('expenses', expensesJson);
+    if (_userId == null) {
+      return;
+    }
+
+    await _firestore.collection('users').doc(_userId).set(
+      {'expenses': _expenses.map((expense) => expense.toFirestore()).toList()},
+      SetOptions(merge: true),
+    );
   }
 
   Future<void> _saveBudget() async {
-    final prefs = await SharedPreferences.getInstance();
+    if (_userId == null) {
+      return;
+    }
+
+    final userDoc = _firestore.collection('users').doc(_userId);
     if (_budget != null) {
-      await prefs.setString('budget', jsonEncode(_budget!.toJson()));
+      await userDoc.set({'budget': _budget!.toFirestore()}, SetOptions(merge: true));
     } else {
-      await prefs.remove('budget');
+      await userDoc.update({'budget': FieldValue.delete()});
     }
   }
 
   Future<void> addExpense(Expense expense) async {
     _expenses.add(expense);
+    await _saveExpenses();
+    notifyListeners();
+  }
+
+  Future<void> deleteExpense(Expense expense) async {
+    _expenses.remove(expense);
     await _saveExpenses();
     notifyListeners();
   }
@@ -58,10 +111,18 @@ class ExpenseProvider with ChangeNotifier {
   }
 
   List<Map<String, dynamic>> getCategoryExpenses() {
-    Map<String, double> categoryTotals = {};
+    final categoryTotals = <String, double>{};
     for (var expense in _expenses) {
       categoryTotals[expense.category] = (categoryTotals[expense.category] ?? 0) + expense.amount;
     }
     return categoryTotals.entries.map((e) => {'category': e.key, 'amount': e.value}).toList();
+  }
+
+  static List<Expense> filterExpensesForDay(List<Expense> expenses, DateTime day) {
+    final targetDay = DateTime(day.year, day.month, day.day);
+    return expenses.where((expense) {
+      final expenseDay = DateTime(expense.date.year, expense.date.month, expense.date.day);
+      return expenseDay == targetDay;
+    }).toList();
   }
 }
